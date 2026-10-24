@@ -26,10 +26,12 @@ export interface OpenMuseConfig {
   /** Answer OpenCode's session-title requests locally instead of spending a Muse prompt on them. */
   localTitles: boolean;
   /**
-   * Run `muse serve` with contributor mode (Muse Code's own default).
-   * Server-listed `-contributor` variants are kept, and every other listed
-   * model gains a derived `-contributor` twin, so future models are covered
-   * automatically. Set to `false` to list the server catalog as-is.
+   * Picking a `-contributor` model runs it on a host spawned with
+   * `muse serve --contributor-mode on`; standard models run with `off`
+   * (Muse Code's own default is on, hence the default here). Every listed
+   * model gains a derived `-contributor` twin unless the server lists one.
+   * Set to `false` for the legacy single host (no flag) and the server
+   * catalog as-is.
    */
   contributor: boolean;
   stateDir: string;

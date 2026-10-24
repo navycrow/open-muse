@@ -213,6 +213,12 @@ default), so a future `muse-new-1.0` is immediately usable as `muse-new-1.0-cont
 Server-listed `-contributor` entries are always kept as-is and never duplicated.
 Set `contributor: false` to list the server catalog as-is instead.
 
+Choosing a model also chooses its mode: `-contributor` models run on a host
+spawned with `muse serve --contributor-mode on`, standard models on a host
+spawned with `--contributor-mode off`. Switching modes mid-conversation starts
+a fresh Muse session seeded with the transcript (like edited history), while a
+same-mode model change reuses the session via `session/setModel`.
+
 Each model gets OpenCode **variants** for the reasoning tiers Muse reports (typically
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Choosing a variant sends `reasoning_effort`, which open-muse passes
 to the Muse turn. Without a variant, Muse uses the model's default effort.
@@ -314,7 +320,7 @@ On OpenCode 2.x:
 | `approvals` | `OPEN_MUSE_APPROVALS` | `allow` | `allow`, `deny`, or `host` ([details](#approvals)) |
 | `toolDisplay` | `OPEN_MUSE_TOOL_DISPLAY` | `reasoning` | Where tool traces go: `reasoning`, `content`, or `hidden` |
 | `localTitles` | `OPEN_MUSE_LOCAL_TITLES` | `true` | Answer session-title requests locally |
-| `contributor` | `OPEN_MUSE_CONTRIBUTOR` | `true` | Run `muse serve` with `--contributor-mode on`; each model also gains a `-contributor` twin unless the server already lists one (`false` lists the server catalog as-is) |
+| `contributor` | `OPEN_MUSE_CONTRIBUTOR` | `true` | `-contributor` models run with `--contributor-mode on`, standard models with `off`; each model gains a `-contributor` twin unless the server lists one (`false`: legacy single host, no flag, server catalog as-is) |
 | `forwardSystemPrompt` | `OPEN_MUSE_FORWARD_SYSTEM` | `false` | Send OpenCode's system prompt to Muse when a session starts. Off by default because it describes OpenCode's tools, which Muse doesn't have. |
 | `providerId` | `OPEN_MUSE_PROVIDER_ID` | `muse` | Provider id in OpenCode (`<id>/<model>`) |
 | `port` | `OPEN_MUSE_PORT` | random | Proxy port |

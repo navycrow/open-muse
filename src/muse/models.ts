@@ -43,6 +43,11 @@ export function withContributorVariants(models: MuseModel[]): MuseModel[] {
   return out;
 }
 
+/** True for `-contributor` model ids, which run on the contributor host. */
+export function isContributorModel(modelId: string | undefined): boolean {
+  return typeof modelId === "string" && modelId.endsWith("-contributor");
+}
+
 /** Alphabetical by id, so each base model sits next to its `-contributor` twin. */
 /**
  * Migrate cache entries written before twins were named by their own id:

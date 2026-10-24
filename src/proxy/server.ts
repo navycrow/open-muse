@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createLogger, type OpenMuseConfig, type Logger, type ApprovalPolicy } from "../config.js";
 import { MuseHost, MuseHostError } from "../muse/host.js";
-import { ModelCatalog } from "../muse/models.js";
+import { ModelCatalog, isContributorModel } from "../muse/models.js";
 import { BadRequestError, SessionRouter } from "../muse/sessions.js";
 import { runTurn, type MuseUsage, type MuseTurnError } from "../muse/turn.js";
 import { type ChatMessage, digestUsers, localTitle, userMessages } from "../translate/messages.js";
@@ -36,9 +36,17 @@ export interface ProxyServer {
 }
 
 export async function startProxy(config: OpenMuseConfig, log: Logger = createLogger(config)): Promise<ProxyServer> {
-  const host = new MuseHost(config, log);
-  const catalog = new ModelCatalog(host, config, log);
-  const router = new SessionRouter(host, config, log);
+  // One host per contributor mode: `-contributor` models run with
+  // `--contributor-mode on`, standard models with `off`. Each host spawns
+  // lazily, so the unused one costs nothing. With `contributor: false` both
+  // keep the legacy behavior (no flag, server list as-is, single mode).
+  const dual = config.contributor;
+  const standardHost = new MuseHost(config, log, dual ? "off" : undefined);
+  const contributorHost = new MuseHost(config, log, dual ? "on" : undefined);
+  const hostFor = (modelId: string | undefined): MuseHost =>
+    dual && isContributorModel(modelId) ? contributorHost : standardHost;
+  const catalog = new ModelCatalog(standardHost, config, log);
+  const router = new SessionRouter(hostFor, config, log);
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch((error) => {
@@ -117,7 +125,7 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     const writer = stream ? new SseWriter(res, responseId, created, model) : undefined;
 
     try {
-      for await (const event of runTurn(host, {
+      for await (const event of runTurn(prepared.host, {
         sessionId: prepared.museSessionId,
         input: prepared.input,
         reasoningEffort: body.reasoning_effort,
@@ -184,12 +192,13 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
   return {
     url: `http://${config.host}:${port}/v1`,
     port,
-    host,
+    host: standardHost,
     catalog,
     async close() {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections?.();
-      await host.close();
+      await standardHost.close();
+      await contributorHost.close();
     },
   };
 }

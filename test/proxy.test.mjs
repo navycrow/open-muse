@@ -162,6 +162,62 @@ test("old cached twins are migrated to the friendly label", async () => {
   );
 });
 
+test("standard and contributor models run on their own host", async () => {
+  const { SessionRouter } = await import("../dist/muse/sessions.js");
+  const { createLogger } = await import("../dist/config.js");
+  const { isContributorModel } = await import("../dist/muse/models.js");
+  const calls = [];
+  const stubHost = (name) => ({
+    command: async (method, params) => {
+      calls.push({ host: name, method, model: params.modelId ?? params.model?.modelId });
+      if (method === "session/start") return { session: { sessionId: `${name}-sess` } };
+      if (method === "session/resume") return { session: { sessionId: params.sessionId } };
+      if (method === "session/setModel") return { status: "accepted" };
+      throw new Error(`unexpected ${method}`);
+    },
+    isLoaded: () => true,
+    markLoaded: () => {},
+  });
+  const standard = stubHost("standard");
+  const contributor = stubHost("contributor");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-routing-"));
+  const cfg = config({ stateDir: dir });
+  const router = new SessionRouter(
+    (modelId) => (isContributorModel(modelId) ? contributor : standard),
+    cfg,
+    createLogger(cfg),
+  );
+  const history = [];
+  const chat = async (modelId, text, reply = "ok") => {
+    if (history.length > 0) history.push({ role: "assistant", content: reply });
+    history.push({ role: "user", content: text });
+    const prepared = await router.prepare({ key: "s-route", workspace: tmp, messages: [...history], modelId });
+    prepared.commit();
+    prepared.release();
+    return prepared;
+  };
+
+  // Standard model starts on the standard host.
+  let p = await chat("muse-spark-1.3", "first");
+  assert.equal(p.host, standard);
+  assert.equal(p.museSessionId, "standard-sess");
+
+  // Same conversation, contributor twin: history continues but the mode
+  // differs, so a fresh session starts on the contributor host.
+  p = await chat("muse-spark-1.3-contributor", "second");
+  assert.equal(p.host, contributor);
+  assert.equal(p.museSessionId, "contributor-sess");
+  assert.ok(calls.some((c) => c.host === "contributor" && c.method === "session/start"));
+
+  // Same-mode model change reuses the session via setModel on the same host.
+  const starts = calls.filter((c) => c.method === "session/start").length;
+  p = await chat("muse-spark-1.2-contributor", "third");
+  assert.equal(p.host, contributor);
+  assert.equal(p.museSessionId, "contributor-sess");
+  assert.equal(calls.filter((c) => c.method === "session/start").length, starts);
+  assert.ok(calls.some((c) => c.host === "contributor" && c.method === "session/setModel" && c.model === "muse-spark-1.2-contributor"));
+});
+
 test("without contributor mode no twin is derived", async () => {
   const { ModelCatalog } = await import("../dist/muse/models.js");
   const { createLogger } = await import("../dist/config.js");
@@ -338,13 +394,23 @@ test("non-streaming responses, model selection and reasoning effort", async () =
   assert.equal(body.choices[0].message.reasoning_content, "Thinking about the request.");
 });
 
-test("switching models mid-conversation calls session/setModel", async () => {
+test("switching contributor modes starts a fresh session, same-mode switches reuse it", async () => {
   const history = [{ role: "user", content: "one" }];
-  let out = await collect(await chat({ messages: history }, session("s-model")));
+  const starts = count("session/start");
+  const sets = count("session/setModel");
+  let out = await collect(await chat({ messages: history }, session("s-modes")));
   history.push({ role: "assistant", content: out.content }, { role: "user", content: "two" });
-  out = await collect(await chat({ model: "muse/muse-spark-1.3-contributor", messages: history }, session("s-model")));
+  // Standard -> contributor: a fresh session on the contributor host, no setModel.
+  out = await collect(await chat({ model: "muse/muse-spark-1.3-contributor", messages: history }, session("s-modes")));
   assert.match(out.content, /model=muse-spark-1.3-contributor/);
-  assert.ok(count("session/setModel") >= 1);
+  assert.equal(count("session/start") - starts, 2);
+  assert.equal(count("session/setModel") - sets, 0);
+  history.push({ role: "assistant", content: out.content }, { role: "user", content: "three" });
+  // Contributor -> contributor: the session is reused via setModel.
+  out = await collect(await chat({ model: "muse/muse-spark-1.2-contributor", messages: history }, session("s-modes")));
+  assert.match(out.content, /model=muse-spark-1.2-contributor/);
+  assert.equal(count("session/start") - starts, 2);
+  assert.ok(count("session/setModel") - sets >= 1);
 });
 
 test("images are forwarded as Muse image parts", async () => {
