@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createLogger, type OpenMuseConfig, type Logger, type ApprovalPolicy } from "../config.js";
 import { MuseHost, MuseHostError } from "../muse/host.js";
-import { ModelCatalog, isContributorModel } from "../muse/models.js";
+import { ModelCatalog, isContributorModel, resolveEffort } from "../muse/models.js";
 import { BadRequestError, SessionRouter } from "../muse/sessions.js";
 import { runTurn, type MuseUsage, type MuseTurnError } from "../muse/turn.js";
 import { type ChatMessage, digestUsers, localTitle, userMessages } from "../translate/messages.js";
@@ -45,7 +45,7 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
   const contributorHost = new MuseHost(config, log, dual ? "on" : undefined);
   const hostFor = (modelId: string | undefined): MuseHost =>
     dual && isContributorModel(modelId) ? contributorHost : standardHost;
-  const catalog = new ModelCatalog(standardHost, config, log);
+  const catalog = new ModelCatalog(standardHost, config, log, dual ? contributorHost : undefined);
   const router = new SessionRouter(hostFor, config, log);
 
   const server = http.createServer((req, res) => {
@@ -78,6 +78,9 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
   }
 
   async function chatCompletions(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // Refresh a day-old cache so the echoed effort (and any new model) is
+    // current even when the first interaction is a chat, not a listing.
+    await catalog.refreshIfStale();
     let body: ChatRequestBody;
     try {
       body = JSON.parse(await readBody(req)) as ChatRequestBody;
@@ -90,7 +93,7 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     // since the real Muse reply never names its own model or effort.
     if (modelId) res.setHeader("x-open-muse-model", modelId);
     res.setHeader("x-open-muse-mode", isContributorModel(modelId) ? "contributor" : "standard");
-    res.setHeader("x-open-muse-reasoning-effort", body.reasoning_effort ?? "default");
+    res.setHeader("x-open-muse-reasoning-effort", resolveEffort(catalog.models, modelId, body.reasoning_effort));
     const agent = header(req, HEADER_AGENT);
     const workspace = resolveWorkspace(header(req, HEADER_DIRECTORY));
     const key = header(req, HEADER_SESSION) ?? `anon:${workspace}:${digestUsers(userMessages(messages).slice(0, 1))}`;

@@ -10,6 +10,14 @@ export interface MuseModel {
   output: number;
   efforts: string[];
   isDefault?: boolean;
+  /** The effort the server applies when none is requested. */
+  defaultEffort?: string;
+}
+
+/** The effort a turn will actually run with: requested, else the model's default, else unresolved. */
+export function resolveEffort(models: MuseModel[], modelId: string | undefined, requested?: string): string {
+  if (requested) return requested;
+  return models.find((m) => m.id === modelId)?.defaultEffort ?? "default";
 }
 
 /** Used until `muse serve` reports the real catalog for this account (then cached). */
@@ -69,14 +77,16 @@ export function sortModels(models: MuseModel[]): MuseModel[] {
 
 export class ModelCatalog {
   #host: MuseHost;
+  #contributorHost?: MuseHost;
   #log: Logger;
   #file: string;
   #models: MuseModel[];
   #cachedAt = 0;
   #contributor: boolean;
 
-  constructor(host: MuseHost, config: OpenMuseConfig, log: Logger) {
+  constructor(host: MuseHost, config: OpenMuseConfig, log: Logger, contributorHost?: MuseHost) {
     this.#host = host;
+    this.#contributorHost = contributorHost;
     this.#log = log;
     this.#file = path.join(config.stateDir, "models.json");
     this.#contributor = config.contributor;
@@ -95,9 +105,42 @@ export class ModelCatalog {
 
   /** Ask `muse serve` for the account's catalog and cache it for the next OpenCode start. */
   async refresh(): Promise<MuseModel[]> {
-    const result = await this.#host.request("model/list", {});
-    const rows = Array.isArray(result.models) ? (result.models as Record<string, any>[]) : [];
-    const listed = rows
+    const listed = this.#parse((await this.#host.request("model/list", {})).models);
+    if (listed.length === 0) return this.#models;
+    // Contributor twins run on the contributor host, whose per-model defaults
+    // can differ (e.g. spark-1.3 defaults to max there, high otherwise).
+    let contribDefaults: Map<string, string> | undefined;
+    if (this.#contributorHost && this.#contributor) {
+      try {
+        const rows = (await this.#contributorHost.request("model/list", {})).models;
+        contribDefaults = new Map<string, string>();
+        for (const r of (Array.isArray(rows) ? rows : []) as Record<string, unknown>[]) {
+          if (typeof r.modelId === "string" && typeof r.defaultReasoningEffort === "string") {
+            contribDefaults.set(r.modelId, r.defaultReasoningEffort);
+          }
+        }
+      } catch (error) {
+        this.#log.debug("contributor catalog skipped:", error instanceof Error ? error.message : error);
+      }
+    }
+    let models = this.#contributor ? withContributorVariants(listed) : listed;
+    if (contribDefaults) {
+      const suffix = "-contributor";
+      models = models.map((m) => {
+        // The contributor host lists base ids: look the twin's default up
+        // under its base id.
+        const d = isContributorModel(m.id) ? contribDefaults.get(m.id.slice(0, -suffix.length)) : undefined;
+        return d !== undefined && d !== m.defaultEffort ? { ...m, defaultEffort: d } : m;
+      });
+    }
+    models = sortModels(models);
+    this.#models = models;
+    this.#writeCache(models);
+    return this.#models;
+  }
+
+  #parse(rows: unknown): MuseModel[] {
+    return (Array.isArray(rows) ? (rows as Record<string, any>[]) : [])
       .filter((r) => typeof r.modelId === "string" && r.modelId)
       .map<MuseModel>((r) => ({
         id: r.modelId,
@@ -106,13 +149,8 @@ export class ModelCatalog {
         output: typeof r.outputLimit === "number" ? r.outputLimit : 131_072,
         efforts: Array.isArray(r.variants) ? r.variants.filter((v: unknown) => typeof v === "string" && v !== "none") : [],
         isDefault: r.isDefault === true,
+        defaultEffort: typeof r.defaultReasoningEffort === "string" && r.defaultReasoningEffort ? r.defaultReasoningEffort : undefined,
       }));
-    if (listed.length > 0) {
-      const models = sortModels(this.#contributor ? withContributorVariants(listed) : listed);
-      this.#models = models;
-      this.#writeCache(models);
-    }
-    return this.#models;
   }
 
   /**

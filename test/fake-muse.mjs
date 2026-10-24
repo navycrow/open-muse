@@ -56,8 +56,8 @@ async function handle({ id, method, params = {} }) {
           profileId: null,
           source: "fake",
           models: [
-            { modelId: "muse-spark-1.3", displayLabel: "Muse Spark 1.3", contextLimit: 1048576, outputLimit: 131072, isDefault: true, isActive: false, variants: ["low", "medium", "high"], cost: null, description: null, profileId: null, providerId: "meta", releaseDate: null },
-            { modelId: "muse-spark-1.3-contributor", displayLabel: "Muse Spark 1.3 (contributor)", contextLimit: 1048576, outputLimit: 131072, isDefault: false, isActive: false, variants: ["low", "medium", "high"], cost: null, description: null, profileId: null, providerId: "meta", releaseDate: null },
+            { modelId: "muse-spark-1.3", displayLabel: "Muse Spark 1.3", contextLimit: 1048576, outputLimit: 131072, isDefault: true, isActive: false, variants: ["low", "medium", "high"], defaultReasoningEffort: "high", cost: null, description: null, profileId: null, providerId: "meta", releaseDate: null },
+            { modelId: "muse-spark-1.3-contributor", displayLabel: "Muse Spark 1.3 (contributor)", contextLimit: 1048576, outputLimit: 131072, isDefault: false, isActive: false, variants: ["low", "medium", "high"], defaultReasoningEffort: "high", cost: null, description: null, profileId: null, providerId: "meta", releaseDate: null },
           ],
         },
       });

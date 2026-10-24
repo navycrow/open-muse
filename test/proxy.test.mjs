@@ -100,7 +100,7 @@ test("contributor refresh derives a -contributor twin for each new base model", 
   const stubHost = {
     request: async () => ({
       models: [
-        { modelId: "muse-new-9.0", displayLabel: "Muse New 9.0", contextLimit: 42, outputLimit: 7, variants: ["low", "high"], isDefault: true },
+        { modelId: "muse-new-9.0", displayLabel: "Muse New 9.0", contextLimit: 42, outputLimit: 7, variants: ["low", "high"], isDefault: true, defaultReasoningEffort: "max" },
       ],
     }),
   };
@@ -118,6 +118,7 @@ test("contributor refresh derives a -contributor twin for each new base model", 
   assert.deepEqual(twin.efforts, ["low", "high"]);
   assert.equal(twin.isDefault, false);
   assert.equal(displayName(twin), "Muse New 9.0 Contributor");
+  assert.equal(twin.defaultEffort, "max");
   // Persisted, so the twin survives restarts without another refresh.
   const cached = JSON.parse(fs.readFileSync(path.join(dir, "models.json"), "utf8"));
   assert.deepEqual(
@@ -216,6 +217,41 @@ test("standard and contributor models run on their own host", async () => {
   assert.equal(p.museSessionId, "contributor-sess");
   assert.equal(calls.filter((c) => c.method === "session/start").length, starts);
   assert.ok(calls.some((c) => c.host === "contributor" && c.method === "session/setModel" && c.model === "muse-spark-1.2-contributor"));
+});
+
+test("twin defaults come from the contributor host", async () => {
+  const { ModelCatalog, resolveEffort } = await import("../dist/muse/models.js");
+  const { createLogger } = await import("../dist/config.js");
+  const row = (defaultReasoningEffort) => ({
+    models: [
+      { modelId: "muse-spark-1.3", displayLabel: "muse-spark-1.3", contextLimit: 1, outputLimit: 1, variants: ["low", "max"], isDefault: true, defaultReasoningEffort },
+    ],
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-dual-defaults-"));
+  const cfg = config({ contributor: true, stateDir: dir });
+  const catalog = new ModelCatalog(
+    { request: async () => row("high") },
+    cfg,
+    createLogger(cfg),
+    { request: async () => row("max") },
+  );
+  const models = await catalog.refresh();
+  const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+  assert.equal(byId["muse-spark-1.3"].defaultEffort, "high");
+  assert.equal(byId["muse-spark-1.3-contributor"].defaultEffort, "max");
+  assert.equal(resolveEffort(models, "muse-spark-1.3"), "high");
+  assert.equal(resolveEffort(models, "muse-spark-1.3-contributor"), "max");
+});
+
+test("resolveEffort returns the real effort a turn will run with", async () => {
+  const { resolveEffort } = await import("../dist/muse/models.js");
+  const models = [
+    { id: "muse-spark-1.3", name: "Muse Spark 1.3", context: 1, output: 1, efforts: ["low", "max"], defaultEffort: "max" },
+  ];
+  assert.equal(resolveEffort(models, "muse-spark-1.3", "low"), "low");
+  assert.equal(resolveEffort(models, "muse-spark-1.3"), "max");
+  assert.equal(resolveEffort(models, "muse-unknown-9.9"), "default");
+  assert.equal(resolveEffort(models, undefined), "default");
 });
 
 test("without contributor mode no twin is derived", async () => {
@@ -393,7 +429,24 @@ test("responses echo the serving model, mode and effort in headers", async () =>
   assert.equal(res.headers.get("x-open-muse-reasoning-effort"), "high");
   const res2 = await chat({ stream: false, messages: [{ role: "user", content: "hi" }] }, session("s-headers-std"));
   assert.equal(res2.headers.get("x-open-muse-mode"), "standard");
-  assert.equal(res2.headers.get("x-open-muse-reasoning-effort"), "default");
+  // The fake server reports high as this model's default effort.
+  assert.equal(res2.headers.get("x-open-muse-reasoning-effort"), "high");
+});
+
+test("a chat refreshes a stale catalog so the echoed effort is real", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-fresh-effort-"));
+  const freshProxy = await startProxy(config({ stateDir: dir }));
+  try {
+    const res = await chat(
+      { stream: false, model: "muse/muse-spark-1.3", messages: [{ role: "user", content: "hi" }] },
+      session("s-fresh-effort"),
+      freshProxy.url,
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("x-open-muse-reasoning-effort"), "high");
+  } finally {
+    await freshProxy.close();
+  }
 });
 
 test("non-streaming responses, model selection and reasoning effort", async () => {
