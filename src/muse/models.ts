@@ -44,6 +44,20 @@ export function withContributorVariants(models: MuseModel[]): MuseModel[] {
 }
 
 /** Alphabetical by id, so each base model sits next to its `-contributor` twin. */
+/**
+ * Migrate cache entries written before twins were named by their own id:
+ * `{ id: "X-contributor", name: "X" }` becomes `{ id: "X-contributor",
+ * name: "X-contributor" }`, so the picker shows the friendly label instead
+ * of `X (X-contributor)`. Entries the server genuinely labeled `X` are
+ * unaffected in behavior: they still display through `displayName`.
+ */
+export function normalizeCachedModels(models: MuseModel[]): MuseModel[] {
+  const suffix = "-contributor";
+  return models.map((m) =>
+    m.id.endsWith(suffix) && m.name === m.id.slice(0, -suffix.length) ? { ...m, name: m.id } : m,
+  );
+}
+
 export function sortModels(models: MuseModel[]): MuseModel[] {
   return [...models].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
@@ -61,7 +75,7 @@ export class ModelCatalog {
     this.#log = log;
     this.#file = path.join(config.stateDir, "models.json");
     this.#contributor = config.contributor;
-    const initial = this.#readCache() ?? DEFAULT_MODELS;
+    const initial = normalizeCachedModels(this.#readCache() ?? DEFAULT_MODELS);
     this.#models = sortModels(this.#contributor ? withContributorVariants(initial) : initial);
   }
 

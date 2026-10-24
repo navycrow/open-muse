@@ -141,6 +141,27 @@ test("model display names are friendly labels, ids stay raw", async () => {
   assert.equal(displayName({ id: "muse-spark-1.3", name: "muse-spark-1.3" }), "Muse Spark 1.3");
 });
 
+test("old cached twins are migrated to the friendly label", async () => {
+  const { ModelCatalog, displayName } = await import("../dist/muse/models.js");
+  const { createLogger } = await import("../dist/config.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-migrate-"));
+  // Cache as written before twins were named by their own id.
+  fs.writeFileSync(
+    path.join(dir, "models.json"),
+    JSON.stringify([
+      { id: "muse-spark-1.3", name: "muse-spark-1.3", context: 1, output: 1, efforts: ["low"] },
+      { id: "muse-spark-1.3-contributor", name: "muse-spark-1.3", context: 1, output: 1, efforts: ["low"] },
+    ]),
+  );
+  const cfg = config({ contributor: true, stateDir: dir });
+  const stubHost = { request: async () => { throw new Error("cache is fresh, must not refresh"); } };
+  const catalog = new ModelCatalog(stubHost, cfg, createLogger(cfg));
+  assert.deepEqual(
+    catalog.models.map((m) => displayName(m)),
+    ["Muse Spark 1.3", "Muse Spark 1.3 Contributor"],
+  );
+});
+
 test("without contributor mode no twin is derived", async () => {
   const { ModelCatalog } = await import("../dist/muse/models.js");
   const { createLogger } = await import("../dist/config.js");
