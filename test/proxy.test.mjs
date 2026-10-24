@@ -382,6 +382,20 @@ test("client disconnect cancels the Muse turn", async () => {
   assert.ok(count("turn/cancel") >= 1);
 });
 
+test("responses echo the serving model, mode and effort in headers", async () => {
+  const res = await chat(
+    { stream: false, model: "muse/muse-spark-1.3-contributor", reasoning_effort: "high", messages: [{ role: "user", content: "hi" }] },
+    session("s-headers"),
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("x-open-muse-model"), "muse-spark-1.3-contributor");
+  assert.equal(res.headers.get("x-open-muse-mode"), "contributor");
+  assert.equal(res.headers.get("x-open-muse-reasoning-effort"), "high");
+  const res2 = await chat({ stream: false, messages: [{ role: "user", content: "hi" }] }, session("s-headers-std"));
+  assert.equal(res2.headers.get("x-open-muse-mode"), "standard");
+  assert.equal(res2.headers.get("x-open-muse-reasoning-effort"), "default");
+});
+
 test("non-streaming responses, model selection and reasoning effort", async () => {
   const res = await chat(
     { stream: false, model: "muse/muse-spark-1.3-contributor", reasoning_effort: "high", messages: [{ role: "user", content: "hi" }] },

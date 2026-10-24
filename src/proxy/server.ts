@@ -86,6 +86,11 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     }
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const modelId = normalizeModel(body.model, config.providerId);
+    // Echo back what served this turn (streaming and non-streaming alike),
+    // since the real Muse reply never names its own model or effort.
+    if (modelId) res.setHeader("x-open-muse-model", modelId);
+    res.setHeader("x-open-muse-mode", isContributorModel(modelId) ? "contributor" : "standard");
+    res.setHeader("x-open-muse-reasoning-effort", body.reasoning_effort ?? "default");
     const agent = header(req, HEADER_AGENT);
     const workspace = resolveWorkspace(header(req, HEADER_DIRECTORY));
     const key = header(req, HEADER_SESSION) ?? `anon:${workspace}:${digestUsers(userMessages(messages).slice(0, 1))}`;
