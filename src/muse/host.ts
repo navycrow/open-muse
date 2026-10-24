@@ -81,7 +81,12 @@ export class MuseHost {
     // Node can't spawn .cmd/.bat shims directly on Windows; route them through cmd.exe.
     const viaCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(resolved);
     const command = viaCmd ? process.env.ComSpec ?? "cmd.exe" : resolved;
-    const args = [...(viaCmd ? ["/d", "/s", "/c", resolved] : []), ...this.#config.museArgsPrefix, "serve"];
+    const args = [
+      ...(viaCmd ? ["/d", "/s", "/c", resolved] : []),
+      ...this.#config.museArgsPrefix,
+      "serve",
+      ...(this.#config.contributor ? ["--contributor-mode", "on"] : []),
+    ];
     this.#log.debug("spawning", command, args.join(" "));
     this.#stderrTail = [];
     const handshake = spawnMspConnection({

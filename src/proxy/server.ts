@@ -55,6 +55,9 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
       return sendJson(res, 200, { ok: true, name: "open-muse" });
     }
     if (req.method === "GET" && route === "/v1/models") {
+      // Refresh a day-old cache on demand, so a model that appears tomorrow
+      // shows up without restarting. Never fails the listing.
+      await catalog.refreshIfStale();
       return sendJson(res, 200, {
         object: "list",
         data: catalog.models.map((m) => ({ id: m.id, object: "model", owned_by: "muse", created: 0 })),

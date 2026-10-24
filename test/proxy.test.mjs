@@ -73,6 +73,143 @@ test("lists models", async () => {
   assert.ok(body.data.some((m) => m.id === "muse-spark-1.3"));
 });
 
+test("contributor option keeps server-listed variants without duplicating them", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-contrib-"));
+  const contributed = await startProxy(config({ contributor: true, stateDir: dir }));
+  try {
+    // The server lists both entries here, so no twin is derived.
+    await contributed.catalog.refresh();
+    const ids = contributed.catalog.models.map((m) => m.id);
+    assert.deepEqual(ids, ["muse-spark-1.3", "muse-spark-1.3-contributor"]);
+    const res = await fetch(`${contributed.url}/models`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      (await res.json()).data.map((m) => m.id),
+      ids,
+    );
+  } finally {
+    await contributed.close();
+  }
+});
+
+test("contributor refresh derives a -contributor twin for each new base model", async () => {
+  const { ModelCatalog, displayName } = await import("../dist/muse/models.js");
+  const { createLogger } = await import("../dist/config.js");
+  // A future server lists only the base id: the twin is derived, limits and
+  // efforts are copied, and the default flag is never inherited.
+  const stubHost = {
+    request: async () => ({
+      models: [
+        { modelId: "muse-new-9.0", displayLabel: "Muse New 9.0", contextLimit: 42, outputLimit: 7, variants: ["low", "high"], isDefault: true },
+      ],
+    }),
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-twin-"));
+  const cfg = config({ contributor: true, stateDir: dir });
+  const catalog = new ModelCatalog(stubHost, cfg, createLogger(cfg));
+  const models = await catalog.refresh();
+  assert.deepEqual(
+    models.map((m) => m.id),
+    ["muse-new-9.0", "muse-new-9.0-contributor"],
+  );
+  const twin = models[1];
+  assert.equal(twin.context, 42);
+  assert.equal(twin.output, 7);
+  assert.deepEqual(twin.efforts, ["low", "high"]);
+  assert.equal(twin.isDefault, false);
+  assert.equal(displayName(twin), "Muse New 9.0 Contributor");
+  // Persisted, so the twin survives restarts without another refresh.
+  const cached = JSON.parse(fs.readFileSync(path.join(dir, "models.json"), "utf8"));
+  assert.deepEqual(
+    cached.map((m) => m.id),
+    ["muse-new-9.0", "muse-new-9.0-contributor"],
+  );
+});
+
+test("model display names are friendly labels, ids stay raw", async () => {
+  const { displayName, prettyModelName } = await import("../dist/muse/models.js");
+  assert.equal(prettyModelName("muse-wonder-1.0"), "Muse Wonder");
+  assert.equal(prettyModelName("muse-wonder-1.0-contributor"), "Muse Wonder Contributor");
+  assert.equal(prettyModelName("muse-spark-1.0"), "Muse Spark");
+  assert.equal(prettyModelName("muse-spark-1.3"), "Muse Spark 1.3");
+  assert.equal(prettyModelName("muse-spark-1.3-contributor"), "Muse Spark 1.3 Contributor");
+  assert.equal(prettyModelName("muse-spark-1.2-contributor"), "Muse Spark 1.2 Contributor");
+  assert.equal(prettyModelName("something-else"), "something-else");
+  // A server-provided label is kept with the id visible, so base and
+  // contributor variants can't be confused.
+  assert.equal(displayName({ id: "muse-spark-1.3", name: "Muse Spark 1.3" }), "Muse Spark 1.3 (muse-spark-1.3)");
+  assert.equal(displayName({ id: "muse-spark-1.3", name: "muse-spark-1.3" }), "Muse Spark 1.3");
+});
+
+test("without contributor mode no twin is derived", async () => {
+  const { ModelCatalog } = await import("../dist/muse/models.js");
+  const { createLogger } = await import("../dist/config.js");
+  const stubHost = {
+    request: async () => ({
+      models: [{ modelId: "muse-new-9.0", displayLabel: "M", contextLimit: 1, outputLimit: 1, variants: ["low"], isDefault: false }],
+    }),
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-notwin-"));
+  const cfg = config({ contributor: false, stateDir: dir });
+  const catalog = new ModelCatalog(stubHost, cfg, createLogger(cfg));
+  assert.deepEqual((await catalog.refresh()).map((m) => m.id), ["muse-new-9.0"]);
+});
+
+test("contributor twins are on by default, even before the first refresh", async () => {
+  const { ModelCatalog, DEFAULT_MODELS } = await import("../dist/muse/models.js");
+  const { createLogger, resolveConfig } = await import("../dist/config.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-default-"));
+  const cfg = resolveConfig({ stateDir: dir });
+  assert.equal(cfg.contributor, true);
+  // Any server call here would be a bug: the twins come from the defaults.
+  const stubHost = { request: async () => { throw new Error("must not refresh"); } };
+  const catalog = new ModelCatalog(stubHost, cfg, createLogger(cfg));
+  assert.deepEqual(
+    catalog.models.map((m) => m.id),
+    [...DEFAULT_MODELS.map((m) => m.id), ...DEFAULT_MODELS.map((m) => `${m.id}-contributor`)].sort(),
+  );
+});
+
+test("catalog is alphabetical, each model next to its contributor twin", async () => {
+  const { ModelCatalog } = await import("../dist/muse/models.js");
+  const { createLogger } = await import("../dist/config.js");
+  const stubHost = {
+    request: async () => ({
+      models: [
+        { modelId: "muse-wonder-1.0", displayLabel: "muse-wonder-1.0", contextLimit: 1, outputLimit: 1, variants: ["low"], isDefault: true },
+        { modelId: "muse-spark-1.2", displayLabel: "muse-spark-1.2", contextLimit: 1, outputLimit: 1, variants: ["low"], isDefault: false },
+      ],
+    }),
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-sorted-"));
+  const cfg = config({ contributor: true, stateDir: dir });
+  const catalog = new ModelCatalog(stubHost, cfg, createLogger(cfg));
+  assert.deepEqual((await catalog.refresh()).map((m) => m.id), [
+    "muse-spark-1.2",
+    "muse-spark-1.2-contributor",
+    "muse-wonder-1.0",
+    "muse-wonder-1.0-contributor",
+  ]);
+});
+
+test("GET /v1/models refreshes a day-old cache so new models appear", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-stale-"));
+  const cacheFile = path.join(dir, "models.json");
+  fs.writeFileSync(cacheFile, JSON.stringify([{ id: "muse-old-1.0", name: "old", context: 1, output: 1, efforts: ["low"] }]));
+  const past = new Date(Date.now() - 25 * 3600 * 1000);
+  fs.utimesSync(cacheFile, past, past);
+  const staleProxy = await startProxy(config({ stateDir: dir }));
+  try {
+    const res = await fetch(`${staleProxy.url}/models`);
+    assert.equal(res.status, 200);
+    const ids = (await res.json()).data.map((m) => m.id);
+    assert.ok(!ids.includes("muse-old-1.0"), "stale cache was replaced");
+    assert.ok(ids.includes("muse-spark-1.3"), "fresh server list is served");
+  } finally {
+    await staleProxy.close();
+  }
+});
+
 test("streams a turn: text, reasoning, usage", async () => {
   const res = await chat({ messages: [{ role: "system", content: "OpenCode tools..." }, { role: "user", content: "hello" }] }, session("s-basic"));
   assert.equal(res.status, 200);

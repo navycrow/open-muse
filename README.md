@@ -192,7 +192,10 @@ opencode run --standalone -m 'muse/muse-wonder-1.0#xhigh' "Find and fix the race
 ## Models and reasoning effort
 
 The model list comes from `muse serve` (`model/list`) for your account and is cached in the
-open-muse state directory (refreshed at most daily). Until the first refresh these defaults
+open-muse state directory. It refreshes automatically: in the background when OpenCode
+starts (if the cache is older than a day), on `GET /v1/models` when the cache is stale,
+and on every `open-muse doctor` run. A model that appears tomorrow is therefore picked
+up without a restart or code change. Until the first refresh these defaults
 are listed:
 
 | Model | Context | Notes |
@@ -202,8 +205,13 @@ are listed:
 | `muse/muse-spark-1.3` | ~1M | |
 | `muse/muse-spark-1.2` | ~1M | |
 
-What you actually get depends on your plan; whatever `model/list` returns (including
-contributor-mode variants, if offered) shows up automatically after the first refresh.
+What you actually get depends on your plan; whatever `model/list` returns shows up
+automatically after the next refresh. Every listed model also appears as a
+`-contributor` twin (same context, output, and reasoning efforts; never the
+default), so a future `muse-new-1.0` is immediately usable as `muse-new-1.0-contributor`
+— this mirrors Muse Code, which itself runs in contributor mode by default.
+Server-listed `-contributor` entries are always kept as-is and never duplicated.
+Set `contributor: false` to list the server catalog as-is instead.
 
 Each model gets OpenCode **variants** for the reasoning tiers Muse reports (typically
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Choosing a variant sends `reasoning_effort`, which open-muse passes
@@ -306,6 +314,7 @@ On OpenCode 2.x:
 | `approvals` | `OPEN_MUSE_APPROVALS` | `allow` | `allow`, `deny`, or `host` ([details](#approvals)) |
 | `toolDisplay` | `OPEN_MUSE_TOOL_DISPLAY` | `reasoning` | Where tool traces go: `reasoning`, `content`, or `hidden` |
 | `localTitles` | `OPEN_MUSE_LOCAL_TITLES` | `true` | Answer session-title requests locally |
+| `contributor` | `OPEN_MUSE_CONTRIBUTOR` | `true` | Run `muse serve` with `--contributor-mode on`; each model also gains a `-contributor` twin unless the server already lists one (`false` lists the server catalog as-is) |
 | `forwardSystemPrompt` | `OPEN_MUSE_FORWARD_SYSTEM` | `false` | Send OpenCode's system prompt to Muse when a session starts. Off by default because it describes OpenCode's tools, which Muse doesn't have. |
 | `providerId` | `OPEN_MUSE_PROVIDER_ID` | `muse` | Provider id in OpenCode (`<id>/<model>`) |
 | `port` | `OPEN_MUSE_PORT` | random | Proxy port |
