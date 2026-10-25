@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { MuseHost, resolveBinary } from "./muse/host.js";
 import { ModelCatalog } from "./muse/models.js";
+import { readUsage } from "./muse/usage.js";
 import { runTurn } from "./muse/turn.js";
 import { startProxy } from "./proxy/server.js";
 
@@ -47,6 +48,9 @@ async function doctor(args: string[]): Promise<number> {
 
     if (args.includes("--no-turn")) console.log("· sign-in not checked (--no-turn)");
     else ok = (await checkSignIn(host, config, log)) && ok;
+
+    // After the test turn so the host observed usage when signed in.
+    await showSubscriptionUsage(host, log);
 
     if (process.platform === "win32") ok = checkWindowsSandbox(config.museBin) && ok;
   } catch (error) {
@@ -91,6 +95,25 @@ async function showModeDefaults(config: ReturnType<typeof resolveConfig>, log: R
     await Promise.all(hosts.map((h) => h.close().catch(() => undefined)));
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Show the subscription quota (5h window, weekly) when the host observed it. */
+async function showSubscriptionUsage(host: MuseHost, log: ReturnType<typeof createLogger>): Promise<void> {
+  const data = await readUsage(host, log);
+  if (!data) {
+    console.log("  subscription usage: not observed yet (run a turn first)");
+    return;
+  }
+  /** Local `YYYY-MM-DD HH:MM`: doctor output faces the user, and bare UTC misleads. */
+  const at = (ms: number): string => {
+    const d = new Date(ms);
+    const p = (n: number): string => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())} local`;
+  };
+  console.log(
+    `  subscription usage: window ${data.window.usedPercent}% (resets ${at(data.window.resetsAtMs)}), ` +
+      `weekly ${data.weekly.usedPercent}% (resets ${at(data.weekly.resetsAtMs)})`,
+  );
 }
 
 /**
