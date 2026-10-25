@@ -73,6 +73,7 @@ export default {
   id: "open-muse-quota",
   setup(ctx: Plugin.Context) {
     const stateDir = String(ctx.options.stateDir ?? process.env.OPEN_MUSE_STATE_DIR ?? defaultStateDir());
+    const providerId = String(ctx.options.providerId ?? "muse");
 
     const [quota, setQuota] = createSignal<Quota | null>(null);
     const [pending, setPending] = createSignal(true);
@@ -120,6 +121,9 @@ export default {
     const release = ctx.ui.slot({
       append: "sidebar.content",
       render: () => {
+        // Only for Muse Code models: the quota is meaningless elsewhere.
+        const current = ctx.ui.model.current();
+        if (current?.providerID !== providerId) return null;
         const q = quota();
         const head = (
           <box flexDirection="row" onMouseDown={() => setCollapsed(!collapsed())}>
