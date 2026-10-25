@@ -27,16 +27,19 @@ export class MuseHost {
   /** Explicit `--contributor-mode` for this host. Undefined keeps the legacy
    * behavior: the flag is passed only when the `contributor` option is on. */
   #contributorMode: "on" | "off" | undefined;
+  /** Extra grantable capabilities requested at handshake (e.g. `sessionMcp`). */
+  #capabilities: string[] | undefined;
   #spawned: Promise<SpawnedMspConnection> | undefined;
   #listeners = new Set<Listener>();
   #loaded = new Set<string>();
   #stderrTail: string[] = [];
   #closing = false;
 
-  constructor(config: OpenMuseConfig, log: Logger, contributorMode?: "on" | "off") {
+  constructor(config: OpenMuseConfig, log: Logger, contributorMode?: "on" | "off", capabilities?: string[]) {
     this.#config = config;
     this.#log = log;
     this.#contributorMode = contributorMode;
+    this.#capabilities = capabilities;
   }
 
   /** Subscribe to every notification the host pushes. Returns the unsubscribe function. */
@@ -116,7 +119,10 @@ export class MuseHost {
     try {
       spawned = await handshake.initialize({
         clientInfo: { name: "open_muse", title: "open-muse (OpenCode bridge)", version: VERSION },
-        capabilities: { userInputDialogs: false },
+        capabilities: {
+          userInputDialogs: false,
+          ...(this.#capabilities?.length ? { requestedCapabilities: this.#capabilities } : {}),
+        },
       });
     } catch (error) {
       throw new MuseHostError(describeSpawnFailure(museBin, error, this.#stderrTail), { cause: error });

@@ -34,6 +34,12 @@ export interface OpenMuseConfig {
    * catalog as-is.
    */
   contributor: boolean;
+  /**
+   * Expose OpenCode's read-only tools (read, grep, glob) to Muse as a
+   * per-session MCP server, executed by OpenCode itself. Off by default:
+   * enabling it changes what Muse can reach for.
+   */
+  tools: boolean;
   stateDir: string;
   debug: boolean;
   /** Append every protocol notification from `muse serve` to this file (JSON lines), for troubleshooting. */
@@ -77,6 +83,7 @@ export function resolveConfig(options: Record<string, unknown> = {}): OpenMuseCo
       typeof options.forwardSystemPrompt === "boolean" ? options.forwardSystemPrompt : envFlag("OPEN_MUSE_FORWARD_SYSTEM", false),
     localTitles: typeof options.localTitles === "boolean" ? options.localTitles : envFlag("OPEN_MUSE_LOCAL_TITLES", true),
     contributor: typeof options.contributor === "boolean" ? options.contributor : envFlag("OPEN_MUSE_CONTRIBUTOR", true),
+    tools: typeof options.tools === "boolean" ? options.tools : envFlag("OPEN_MUSE_TOOLS", false),
     stateDir: String(options.stateDir ?? env.OPEN_MUSE_STATE_DIR ?? defaultStateDir()),
     debug: typeof options.debug === "boolean" ? options.debug : envFlag("OPEN_MUSE_DEBUG", false),
     traceFile: typeof options.traceFile === "string" ? options.traceFile : env.OPEN_MUSE_TRACE_FILE || undefined,

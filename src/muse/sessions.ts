@@ -54,18 +54,25 @@ const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
  * history, compaction, a lost mapping) starts a fresh Muse session seeded with
  * a rendering of the earlier conversation.
  */
+export interface RouterTools {
+  /** Base URL of the proxy serving the per-conversation MCP endpoint. */
+  baseUrl: string;
+}
+
 export class SessionRouter {
   #hostFor: (modelId: string | undefined) => MuseHost;
   #config: OpenMuseConfig;
   #log: Logger;
+  #tools?: RouterTools;
   #file: string;
   #mappings = new Map<string, Mapping>();
   #locks = new Map<string, Promise<void>>();
 
-  constructor(hostFor: (modelId: string | undefined) => MuseHost, config: OpenMuseConfig, log: Logger) {
+  constructor(hostFor: (modelId: string | undefined) => MuseHost, config: OpenMuseConfig, log: Logger, tools?: RouterTools) {
     this.#hostFor = hostFor;
     this.#config = config;
     this.#log = log;
+    this.#tools = tools;
     this.#file = path.join(config.stateDir, "sessions.json");
     this.#load();
   }
@@ -88,6 +95,9 @@ export class SessionRouter {
     const mapping = request.ephemeral ? undefined : this.#mappings.get(request.key);
     const commitFor = (museSessionId: string) => () => {
       if (request.ephemeral) return;
+      // Always remembered in memory (so the MCP endpoint can route by
+      // conversation key); persisted across restarts only for real
+      // conversations, never for one-off jobs.
       this.#mappings.set(request.key, {
         museSessionId,
         workspace: request.workspace,
@@ -96,7 +106,7 @@ export class SessionRouter {
         modelId: request.modelId,
         updatedAt: Date.now(),
       });
-      this.#save();
+      if (!request.ephemeral) this.#save();
     };
 
     if (
@@ -124,7 +134,7 @@ export class SessionRouter {
     if (history) prefix.push(history);
 
     const host = this.#hostFor(request.modelId);
-    const museSessionId = await this.#start(host, request.workspace, request.modelId);
+    const museSessionId = await this.#start(host, request.key, request.workspace, request.modelId);
     this.#log.debug("started muse session", museSessionId, mapping ? "(history diverged)" : "");
     return { museSessionId, host, input: toTurnInput(last, prefix.join("\n\n")), commit: once(commitFor(museSessionId)) };
   }
@@ -154,9 +164,25 @@ export class SessionRouter {
     }
   }
 
-  async #start(host: MuseHost, workspace: string, modelId: string | undefined): Promise<string> {
+  /** Workspace of a known conversation key (OpenCode session id), for MCP routing. */
+  workspaceFor(key: string): string | undefined {
+    return this.#mappings.get(key)?.workspace;
+  }
+
+  async #start(host: MuseHost, key: string, workspace: string, modelId: string | undefined): Promise<string> {
     const params: Record<string, unknown> = { workspaceRoot: workspace };
     if (modelId) params.modelId = modelId;
+    if (this.#tools) {
+      params.config = {
+        mcpServers: {
+          "open-muse-tools": {
+            transport: "streamableHttp",
+            url: `${this.#tools.baseUrl}/mcp/${encodeURIComponent(key)}`,
+            mode: "optional",
+          },
+        },
+      };
+    }
     const result = await host.command("session/start", params);
     const session = result.session as { sessionId?: string } | undefined;
     if (!session?.sessionId) throw new Error("muse serve did not return a session id");

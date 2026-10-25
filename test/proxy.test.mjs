@@ -433,6 +433,106 @@ test("responses echo the serving model, mode and effort in headers", async () =>
   assert.equal(res2.headers.get("x-open-muse-reasoning-effort"), "high");
 });
 
+test("bridged tools stay in the project and refuse secrets", async () => {
+  const { createToolExecutor } = await import("../dist/opencode/tools.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-tools-"));
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "a.ts"), "hello\n".repeat(5));
+  fs.writeFileSync(path.join(dir, ".env"), "KEY=sekret\n");
+  const run = createToolExecutor();
+  const log = { debug: () => {}, warn: () => {} };
+  const at = (tool, args) => run({ tool, args, directory: dir }, log);
+  assert.equal(await at("read", { path: "src/a.ts" }), "hello\n".repeat(5));
+  assert.match(await at("grep", { pattern: "hello" }), /src\/a\.ts:1: hello/);
+  assert.match(await at("glob", { query: "src/*.ts" }), /src\/a\.ts/);
+  await assert.rejects(at("write", {}), /unknown tool/);
+  await assert.rejects(at("read", {}), /path/);
+  await assert.rejects(at("read", { path: ".env" }), /sensitive/);
+  await assert.rejects(at("read", { path: "../outside" }), /escapes/);
+  await assert.rejects(at("read", { path: "missing.txt" }), /not a file/);
+  await assert.rejects(at("grep", {}), /pattern/);
+  await assert.rejects(at("grep", { pattern: "([" }), /invalid regex/);
+  await assert.rejects(at("glob", {}), /query/);
+});
+
+test("MCP endpoint lists tools and executes them per conversation", async () => {
+  const seen = [];
+  const executor = async ({ tool, args, directory }) => {
+    seen.push({ tool, args, directory });
+    if (tool === "read" && args.path === "boom") throw new Error("kaboom");
+    return `${tool}:${args.path ?? args.pattern ?? args.query}@${directory}`;
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-mcp-"));
+  const mcpProxy = await startProxy(config({ stateDir: dir, tools: true }), undefined, executor);
+  const mcpBase = mcpProxy.url.replace(/\/v1$/, "");
+  try {
+    // The MCP transport answers with server-sent events; unwrap the data frame.
+    const rpc = async (method, params, key = "s-mcp") => {
+      const res = await fetch(`${mcpBase}/mcp/${key}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const text = await res.text();
+      const frames = text.split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)));
+      assert.ok(frames.length >= 1, `expected SSE data frame, got: ${text.slice(0, 200)}`);
+      return frames.at(-1);
+    };
+    // tools/list works before any turn ran for the key.
+    const listed = await rpc("tools/list", {});
+    assert.deepEqual(
+      listed.result.tools.map((t) => t.name).sort(),
+      ["glob", "grep", "read"],
+    );
+    // tools/call on an unknown conversation fails as an MCP error, not HTTP.
+    const unknown = await rpc("tools/call", { name: "read", arguments: { path: "a" } }, "nope");
+    assert.equal(unknown.result.isError, true);
+    assert.match(unknown.result.content[0].text, /unknown conversation/);
+    // Run one chat so the conversation key maps to a workspace, then call.
+    await collect(await chat({ messages: [{ role: "user", content: "hi" }] }, session("s-mcp"), mcpProxy.url));
+    const called = await rpc("tools/call", { name: "read", arguments: { path: "a.ts" } });
+    assert.equal(called.result.isError, undefined);
+    assert.match(called.result.content[0].text, /^read:a\.ts@/);
+    assert.equal(seen.at(-1).directory, tmp);
+    const failing = await rpc("tools/call", { name: "read", arguments: { path: "boom" } });
+    assert.equal(failing.result.isError, true);
+    assert.match(failing.result.content[0].text, /kaboom/);
+    // Wrong verb and missing key are plain HTTP errors.
+    assert.equal((await fetch(`${mcpBase}/mcp/s-mcp`, { method: "GET" })).status, 405);
+    assert.equal((await fetch(`${mcpBase}/mcp/`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 404);
+  } finally {
+    await mcpProxy.close();
+  }
+});
+
+test("session/start advertises the MCP tools only when enabled", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-mcp-flag-"));
+  const stub = async () => "ok";
+  const on = await startProxy(config({ stateDir: dir, tools: true }), undefined, stub);
+  try {
+    const beforeOn = count("session/start");
+    await collect(await chat({ messages: [{ role: "user", content: "hi" }] }, session("s-mcp-on"), on.url));
+    const starts = requests().filter((r) => r.method === "session/start").slice(beforeOn);
+    assert.equal(starts.length, 1);
+    const last = starts.at(-1);
+    assert.match(last.params.config.mcpServers["open-muse-tools"].url, /\/mcp\/s-mcp-on$/);
+    assert.equal(last.params.config.mcpServers["open-muse-tools"].transport, "streamableHttp");
+  } finally {
+    await on.close();
+  }
+  const off = await startProxy(config({ stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-mcp-off-")) }));
+  try {
+    const before = count("session/start");
+    await collect(await chat({ messages: [{ role: "user", content: "hi" }] }, session("s-mcp-off"), off.url));
+    const starts = requests().filter((r) => r.method === "session/start").slice(before);
+    assert.ok(starts.length >= 1);
+    assert.ok(starts.every((r) => r.params.config === undefined));
+    assert.equal((await fetch(`${off.url.replace(/\/v1$/, "")}/mcp/s-mcp-off`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 404);
+  } finally {
+    await off.close();
+  }
+});
+
 test("GET /v1/usage returns the subscription quota", async () => {
   const res = await fetch(`${proxy.url}/usage`);
   assert.equal(res.status, 200);

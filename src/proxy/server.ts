@@ -8,6 +8,8 @@ import { MuseHost, MuseHostError } from "../muse/host.js";
 import { ModelCatalog, isContributorModel, resolveEffort } from "../muse/models.js";
 import { readUsage } from "../muse/usage.js";
 import { BadRequestError, SessionRouter } from "../muse/sessions.js";
+import { createMcpHandler } from "./mcp.js";
+import { createToolExecutor, type ToolExecutor } from "../opencode/tools.js";
 import { runTurn, type MuseUsage, type MuseTurnError } from "../muse/turn.js";
 import { type ChatMessage, digestUsers, localTitle, userMessages } from "../translate/messages.js";
 
@@ -36,18 +38,27 @@ export interface ProxyServer {
   close(): Promise<void>;
 }
 
-export async function startProxy(config: OpenMuseConfig, log: Logger = createLogger(config)): Promise<ProxyServer> {
+export async function startProxy(
+  config: OpenMuseConfig,
+  log: Logger = createLogger(config),
+  toolExecutor?: ToolExecutor,
+): Promise<ProxyServer> {
   // One host per contributor mode: `-contributor` models run with
   // `--contributor-mode on`, standard models with `off`. Each host spawns
   // lazily, so the unused one costs nothing. With `contributor: false` both
   // keep the legacy behavior (no flag, server list as-is, single mode).
   const dual = config.contributor;
-  const standardHost = new MuseHost(config, log, dual ? "off" : undefined);
-  const contributorHost = new MuseHost(config, log, dual ? "on" : undefined);
+  // The local read-only executor needs no OpenCode client; tests inject a stub.
+  const bridge = config.tools ? (toolExecutor ?? createToolExecutor()) : undefined;
+  const mcpCaps = bridge ? ["sessionMcp"] : undefined;
+  const standardHost = new MuseHost(config, log, dual ? "off" : undefined, mcpCaps);
+  const contributorHost = new MuseHost(config, log, dual ? "on" : undefined, mcpCaps);
   const hostFor = (modelId: string | undefined): MuseHost =>
     dual && isContributorModel(modelId) ? contributorHost : standardHost;
   const catalog = new ModelCatalog(standardHost, config, log, dual ? contributorHost : undefined);
-  const router = new SessionRouter(hostFor, config, log);
+  // Assigned after listen: the router and the MCP endpoint need the proxy URL.
+  let router!: SessionRouter;
+  let mcpHandler: ((req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>) | undefined;
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch((error) => {
@@ -78,6 +89,9 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     }
     if (req.method === "POST" && route === "/v1/chat/completions") {
       return chatCompletions(req, res);
+    }
+    if (mcpHandler && (route === "/mcp" || route.startsWith("/mcp/"))) {
+      return mcpHandler(req, res);
     }
     sendError(res, 404, `No route for ${req.method} ${url.pathname}`);
   }
@@ -200,10 +214,17 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     server.listen(config.port, config.host, () => resolve());
   });
   const port = (server.address() as AddressInfo).port;
-  log.debug(`proxy listening on http://${config.host}:${port}/v1`);
+  const origin = `http://${config.host}:${port}`;
+  const url = `${origin}/v1`;
+  log.debug(`proxy listening on ${url}`);
+  router = new SessionRouter(hostFor, config, log, bridge ? { baseUrl: origin } : undefined);
+  if (bridge) {
+    const execute = bridge;
+    mcpHandler = createMcpHandler(execute, (key) => router.workspaceFor(key), log);
+  }
 
   return {
-    url: `http://${config.host}:${port}/v1`,
+    url,
     port,
     host: standardHost,
     catalog,
