@@ -48,6 +48,18 @@ async function handle({ id, method, params = {} }) {
           userAgent: "fake-muse/1.4.6",
         },
       });
+    case "usage/read":
+      return send({
+        id,
+        result: {
+          usage: {
+            observedAtMs: 1,
+            tier: "fake-tier",
+            weekly: { resetsAtMs: 2, usedPercent: 46 },
+            window: { resetsAtMs: 3, usedPercent: 16, windowDurationMins: 300 },
+          },
+        },
+      });
     case "model/list":
       return send({
         id,

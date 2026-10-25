@@ -160,8 +160,10 @@ opencode models | grep '^muse/'     # OpenCode 2.x
 ```
 
 `doctor` shows which `muse` binary it found, starts `muse serve`, lists the models your
-account can use, runs one tiny turn in an empty temp folder to confirm you're signed in (a few
-tokens of quota; skip it with `--no-turn`), and on Windows checks the sandbox. The `models` command should print entries like
+account can use with each model's default effort in standard vs contributor mode, runs one
+tiny turn in an empty temp folder to confirm you're signed in (a few tokens of quota; skip
+it with `--no-turn`), then shows the subscription quota (5h window and weekly percent),
+and on Windows checks the sandbox. The `models` command should print entries like
 `muse/muse-wonder-1.0`.
 
 Restart OpenCode after installing or upgrading.
@@ -366,6 +368,7 @@ npx open-muse serve --port 4517
 
 - Base URL: `http://127.0.0.1:4517/v1`, any API key
 - `GET /v1/models`, `POST /v1/chat/completions` (streaming and non-streaming)
+- `GET /v1/usage`: subscription quota (`window` 5h percent and reset, `weekly` percent and reset, `tier`); `data` is `null` until the host observed a turn
 - Optional headers:
   - `x-open-muse-session`: conversation id (otherwise one is derived from the first message)
   - `x-open-muse-directory`: project directory Muse should work in (otherwise the proxy's cwd)

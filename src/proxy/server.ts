@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { createLogger, type OpenMuseConfig, type Logger, type ApprovalPolicy } from "../config.js";
 import { MuseHost, MuseHostError } from "../muse/host.js";
 import { ModelCatalog, isContributorModel, resolveEffort } from "../muse/models.js";
+import { readUsage } from "../muse/usage.js";
 import { BadRequestError, SessionRouter } from "../muse/sessions.js";
 import { runTurn, type MuseUsage, type MuseTurnError } from "../muse/turn.js";
 import { type ChatMessage, digestUsers, localTitle, userMessages } from "../translate/messages.js";
@@ -61,6 +62,10 @@ export async function startProxy(config: OpenMuseConfig, log: Logger = createLog
     const route = url.pathname.replace(/\/+$/, "");
     if (req.method === "GET" && (route === "" || route === "/health")) {
       return sendJson(res, 200, { ok: true, name: "open-muse" });
+    }
+    if (req.method === "GET" && route === "/v1/usage") {
+      // Subscription quota (5h window, weekly): cheap to read, no turn spent.
+      return sendJson(res, 200, { object: "subscription_usage", data: await readUsage(standardHost, log) });
     }
     if (req.method === "GET" && route === "/v1/models") {
       // Refresh a day-old cache on demand, so a model that appears tomorrow

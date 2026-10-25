@@ -433,6 +433,28 @@ test("responses echo the serving model, mode and effort in headers", async () =>
   assert.equal(res2.headers.get("x-open-muse-reasoning-effort"), "high");
 });
 
+test("GET /v1/usage returns the subscription quota", async () => {
+  const res = await fetch(`${proxy.url}/usage`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.object, "subscription_usage");
+  assert.equal(body.data.window.usedPercent, 16);
+  assert.equal(body.data.weekly.usedPercent, 46);
+  assert.equal(body.data.window.windowDurationMins, 300);
+});
+
+test("readUsage returns null when the host observed nothing", async () => {
+  const { readUsage } = await import("../dist/muse/usage.js");
+  const { createLogger } = await import("../dist/config.js");
+  const log = createLogger({ debug: false });
+  assert.equal(await readUsage({ request: async () => ({}) }, log), null);
+  assert.equal(await readUsage({ request: async () => { throw new Error("down"); } }, log), null);
+  assert.equal(
+    await readUsage({ request: async () => ({ usage: { weekly: {}, window: {} } }) }, log),
+    null,
+  );
+});
+
 test("a chat refreshes a stale catalog so the echoed effort is real", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-fresh-effort-"));
   const freshProxy = await startProxy(config({ stateDir: dir }));
