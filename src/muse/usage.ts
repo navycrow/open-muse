@@ -17,6 +17,15 @@ type UsageHost = {
  * when the host observed nothing yet (fresh host, no turn run) or the call
  * fails: usage display must never break the request it accompanies.
  */
+/**
+ * Merge per-host observations: the quota is account-wide, but each host only
+ * sees the turns it served. Freshest observation wins; a one-sided null is fine.
+ */
+export function pickUsage(a: SubscriptionUsage | null, b: SubscriptionUsage | null): SubscriptionUsage | null {
+  if (a && b) return a.observedAtMs >= b.observedAtMs ? a : b;
+  return a ?? b;
+}
+
 export async function readUsage(host: UsageHost, log: Logger): Promise<SubscriptionUsage | null> {
   try {
     const result = await host.request("usage/read", {});

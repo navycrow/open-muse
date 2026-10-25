@@ -297,6 +297,52 @@ after 30 days.
 
 Image attachments are sent to Muse as image input parts.
 
+### Project tools in Muse
+
+When OpenCode switches from another provider to Muse, Muse starts a fresh session that
+has never seen your files. With `tools: true`, open-muse hands Muse three read-only
+project tools via a per-session MCP server (`read`, `grep`, `glob`), so it can catch up
+by reading the conversation's project instead of answering blindly:
+
+```json
+{
+  "plugin": [
+    ["file:///path/to/open-muse", { "tools": true }]
+  ]
+}
+```
+
+Scope and limits (v1):
+
+- scoped to the conversation's project directory; `..` escapes and symlinks outside it
+  are refused, as are `.env*`, `.git/`, `node_modules/`, and key material
+  (`*.pem`, `*.key`, `id_*`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `credentials*`)
+- read-only and bounded: 50 KB file cap with truncation notice, 50 results per
+  search, 30 s timeout, 10 concurrent calls max
+- enable with `"tools": true` (`OPEN_MUSE_TOOLS=true`); off by default
+- execution currently happens inside the proxy: OpenCode-owned execution (permissions,
+  sandboxing, audit) needs a tool-execution API that neither plugin 1.x nor 2.x
+  exposes, so it's tracked as a follow-up
+
+### Quota in the sidebar
+
+A TUI plugin shows your subscription quota in the sidebar (`Muse quota` panel:
+5h and weekly percents with progress bars and local reset times, refreshed every
+minute and after each turn). On OpenCode 2.x it's discovered automatically
+as the `tui` sibling of the server plugin — no config, no build needed (change the
+`append` target in `tui.tsx` to move it, e.g. `prompt.footer.status`). On 1.x,
+register it in `tui.json`:
+
+```json
+{
+  "plugin": ["file:///path/to/open-muse/tui.tsx"]
+}
+```
+
+It finds the proxy through `<stateDir>/proxy.json` (written on start), so there
+is no port to configure. It shows `Muse —` when the proxy is unreachable and
+never breaks the TUI.
+
 ## Configuration
 
 Options go in the plugin entry in `opencode.json`, or in environment variables. Plugin options
@@ -331,6 +377,7 @@ On OpenCode 2.x:
 | `debug` | `OPEN_MUSE_DEBUG` | `false` | Log proxy and `muse serve` activity to stderr |
 | `traceFile` | `OPEN_MUSE_TRACE_FILE` | unset | Append every protocol notification from `muse serve` to this file (JSON lines) |
 | `museEnv` | — | `{}` | Extra environment variables for `muse serve`, e.g. to point it at a different config dir |
+| `tools` | `OPEN_MUSE_TOOLS` | `false` | Expose read-only project tools (`read`, `grep`, `glob`) to Muse as a per-session MCP server ([details](#project-tools-in-muse)) |
 
 State directory default: `%LOCALAPPDATA%\open-muse` on Windows, `$XDG_DATA_HOME/open-muse`
 (or `~/.local/share/open-muse`) elsewhere.
@@ -490,8 +537,11 @@ at a scratch folder containing an `opencode/opencode.json` with the `file://` pl
 
 ## Roadmap
 
-- [ ] **OpenCode tools in Muse:** serve OpenCode's tools as a per-session MCP server
-      (`session/start` `config.mcpServers`) so OpenCode owns execution and permissions
+- [x] **OpenCode tools in Muse (read-only v1):** per-session MCP server
+      (`session/start` `config.mcpServers`) exposing `read`/`grep`/`glob`, scoped to the
+      conversation's project with sensitive files refused. Executed locally by the proxy:
+      OpenCode-owned execution needs a host API for running tools that plugins don't get
+      (tracked for a follow-up)
 - [ ] Show Muse approval prompts in OpenCode instead of deciding them automatically
 - [ ] OpenCode 2.0 entrypoint
 - [ ] `open-muse install` to edit `opencode.json` for you
