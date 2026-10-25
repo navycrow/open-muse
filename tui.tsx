@@ -123,7 +123,7 @@ export default {
         const q = quota();
         const head = (
           <box flexDirection="row" onMouseDown={() => setCollapsed(!collapsed())}>
-            <text>{collapsed() ? "▶ Muse quota" : "▼ Muse quota"}</text>
+            <text>{collapsed() ? "▶ Muse Code quota" : "▼ Muse Code quota"}</text>
           </box>
         );
         if (collapsed() || !q) {
@@ -147,14 +147,14 @@ export default {
               <text style={{ fg: green() }}>•</text>
               <text style={{ fg: fg() }}>{"5h  "}</text>
               <text style={{ fg: fg() }}>
-                {pct(q.windowPercent)} → {q.windowReset}
+                {pct(q.windowPercent)} (reset at {q.windowReset})
               </text>
             </box>
             <box flexDirection="row" columnGap={1}>
               <text style={{ fg: green() }}>•</text>
               <text style={{ fg: fg() }}>week</text>
               <text style={{ fg: fg() }}>
-                {pct(q.weeklyPercent)} → {q.weeklyReset}
+                {pct(q.weeklyPercent)} (reset at {q.weeklyReset})
               </text>
             </box>
           </box>
