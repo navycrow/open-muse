@@ -543,6 +543,26 @@ test("GET /v1/usage returns the subscription quota", async () => {
   assert.equal(body.data.window.windowDurationMins, 300);
 });
 
+test("proxy advertises its URL for the TUI quota footer", async () => {
+  const raw = fs.readFileSync(path.join(tmp, "proxy.json"), "utf8");
+  const info = JSON.parse(raw);
+  assert.equal(info.url, proxy.url);
+  assert.equal(info.port, proxy.port);
+  assert.equal(info.origin, proxy.url.replace(/\/v1$/, ""));
+  assert.equal(typeof info.pid, "number");
+});
+
+test("usage merges both hosts, freshest observation wins", async () => {
+  const { pickUsage } = await import("../dist/muse/usage.js");
+  const older = { observedAtMs: 1, tier: "t", weekly: { resetsAtMs: 1, usedPercent: 40 }, window: { resetsAtMs: 1, usedPercent: 10 } };
+  const newer = { observedAtMs: 2, tier: "t", weekly: { resetsAtMs: 1, usedPercent: 46 }, window: { resetsAtMs: 1, usedPercent: 16 } };
+  assert.equal(pickUsage(null, null), null);
+  assert.equal(pickUsage(newer, null), newer);
+  assert.equal(pickUsage(null, newer), newer);
+  assert.equal(pickUsage(older, newer), newer);
+  assert.equal(pickUsage(newer, older), newer);
+});
+
 test("readUsage returns null when the host observed nothing", async () => {
   const { readUsage } = await import("../dist/muse/usage.js");
   const { createLogger } = await import("../dist/config.js");

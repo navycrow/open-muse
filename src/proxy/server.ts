@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { createLogger, type OpenMuseConfig, type Logger, type ApprovalPolicy } from "../config.js";
 import { MuseHost, MuseHostError } from "../muse/host.js";
 import { ModelCatalog, isContributorModel, resolveEffort } from "../muse/models.js";
-import { readUsage } from "../muse/usage.js";
+import { pickUsage, readUsage } from "../muse/usage.js";
 import { BadRequestError, SessionRouter } from "../muse/sessions.js";
 import { createMcpHandler } from "./mcp.js";
 import { createToolExecutor, type ToolExecutor } from "../opencode/tools.js";
@@ -76,7 +76,12 @@ export async function startProxy(
     }
     if (req.method === "GET" && route === "/v1/usage") {
       // Subscription quota (5h window, weekly): cheap to read, no turn spent.
-      return sendJson(res, 200, { object: "subscription_usage", data: await readUsage(standardHost, log) });
+      // Each host only observes the turns it served, so merge both modes.
+      const [standard, contributor] = await Promise.all([
+        readUsage(standardHost, log),
+        dual ? readUsage(contributorHost, log) : Promise.resolve(null),
+      ]);
+      return sendJson(res, 200, { object: "subscription_usage", data: pickUsage(standard, contributor) });
     }
     if (req.method === "GET" && route === "/v1/models") {
       // Refresh a day-old cache on demand, so a model that appears tomorrow
@@ -217,6 +222,16 @@ export async function startProxy(
   const origin = `http://${config.host}:${port}`;
   const url = `${origin}/v1`;
   log.debug(`proxy listening on ${url}`);
+  // The TUI quota footer reads this to find the proxy without any manual config.
+  try {
+    fs.mkdirSync(config.stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(config.stateDir, "proxy.json"),
+      JSON.stringify({ url, origin, port, pid: process.pid, startedAtMs: Date.now() }),
+    );
+  } catch (error) {
+    log.debug("proxy.json skipped:", error instanceof Error ? error.message : error);
+  }
   router = new SessionRouter(hostFor, config, log, bridge ? { baseUrl: origin } : undefined);
   if (bridge) {
     const execute = bridge;

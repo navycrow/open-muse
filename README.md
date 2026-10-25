@@ -324,6 +324,24 @@ Scope and limits (v1):
   sandboxing, audit) needs a tool-execution API that neither plugin 1.x nor 2.x
   exposes, so it's tracked as a follow-up
 
+### Quota in the sidebar
+
+A TUI plugin shows your subscription quota next to the prompt (`Muse 5h 20% ·
+sem 46%`, refreshed every minute and after each turn). On OpenCode 2.x it's discovered automatically
+as the `tui` sibling of the server plugin — no config, no build needed (change the
+`append` target in `tui.tsx` to move it, e.g. `sidebar.footer`). On 1.x,
+register it in `tui.json`:
+
+```json
+{
+  "plugin": ["file:///path/to/open-muse/tui.tsx"]
+}
+```
+
+It finds the proxy through `<stateDir>/proxy.json` (written on start), so there
+is no port to configure. It shows `Muse —` when the proxy is unreachable and
+never breaks the TUI.
+
 ## Configuration
 
 Options go in the plugin entry in `opencode.json`, or in environment variables. Plugin options

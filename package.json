@@ -8,7 +8,8 @@
   "exports": {
     ".": "./dist/plugin.js",
     "./server": "./server.js",
-    "./proxy": "./dist/proxy/server.js"
+    "./proxy": "./dist/proxy/server.js",
+    "./tui": "./tui.tsx"
   },
   "bin": {
     "open-muse": "dist/cli.js"
@@ -16,6 +17,7 @@
   "files": [
     "dist",
     "server.js",
+    "tui.tsx",
     "README.md",
     "LICENSE"
   ],
