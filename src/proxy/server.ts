@@ -391,7 +391,11 @@ class SseWriter {
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    this.#write({ ...this.#base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] });
+    // Role only, no empty `content`: an empty text part created here would stay
+    // pinned above the thinking block, so the real answer would render above
+    // the reasoning instead of streaming below it. The first real delta
+    // (usually reasoning, Muse thinks first) sets the natural part order.
+    this.#write({ ...this.#base, choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] });
   }
 
   #write(value: unknown) {
