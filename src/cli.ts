@@ -43,6 +43,8 @@ async function doctor(args: string[]): Promise<number> {
     console.log(`✓ ${models.length} model(s) available:`);
     for (const m of models) console.log(`  - ${config.providerId}/${m.id}${m.isDefault ? " (default)" : ""}`);
 
+    await showModeDefaults(config, log);
+
     if (args.includes("--no-turn")) console.log("· sign-in not checked (--no-turn)");
     else ok = (await checkSignIn(host, config, log)) && ok;
 
@@ -55,6 +57,40 @@ async function doctor(args: string[]): Promise<number> {
   }
   if (ok) console.log('\nReady. In OpenCode, pick a "muse/..." model (e.g. /models).');
   return ok ? 0 : 1;
+}
+
+/**
+ * Show each model's default effort with contributor mode off vs on. A difference
+ * proves the mode is meaningful for that model; identical values prove nothing
+ * either way. Informational only: never fails the doctor run.
+ */
+async function showModeDefaults(config: ReturnType<typeof resolveConfig>, log: ReturnType<typeof createLogger>): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-muse-doctor-modes-"));
+  const hosts: MuseHost[] = [];
+  try {
+    const list = async (mode: "on" | "off"): Promise<Map<string, string>> => {
+      const host = new MuseHost({ ...config, contributor: false }, log, mode);
+      hosts.push(host);
+      // Raw server list (no twins): compare what each mode really reports.
+      const catalog = new ModelCatalog(host, { ...config, stateDir: dir, contributor: false }, log);
+      const models = await catalog.refresh();
+      return new Map(models.map((m) => [m.id, m.defaultEffort ?? "?"]));
+    };
+    const [off, on] = await Promise.all([list("off"), list("on")]);
+    const ids = [...new Set([...off.keys(), ...on.keys()])].sort();
+    if (ids.length === 0) return;
+    console.log("  default effort per mode (standard | contributor):");
+    for (const id of ids) {
+      const a = off.get(id) ?? "?";
+      const b = on.get(id) ?? "?";
+      console.log(`    - ${id}: ${a} | ${b}${a !== b ? "  * differs" : ""}`);
+    }
+  } catch (error) {
+    log.debug("mode comparison skipped:", error instanceof Error ? error.message : error);
+  } finally {
+    await Promise.all(hosts.map((h) => h.close().catch(() => undefined)));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**
