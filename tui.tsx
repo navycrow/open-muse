@@ -45,7 +45,14 @@ function resetLabel(ms: number): string {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${time}`;
 }
 
-function quotaLabel(data: any): string | undefined {
+interface Quota {
+  windowPercent: number;
+  weeklyPercent: number;
+  windowReset: string;
+  weeklyReset: string;
+}
+
+function parseQuota(data: any): Quota | undefined {
   const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
   const windowPercent = num(data?.window?.usedPercent);
   const weeklyPercent = num(data?.weekly?.usedPercent);
@@ -59,7 +66,7 @@ function quotaLabel(data: any): string | undefined {
   ) {
     return undefined;
   }
-  return `Muse 5h ${windowPercent}% → ${resetLabel(windowReset)} · sem ${weeklyPercent}% → ${resetLabel(weeklyReset)}`;
+  return { windowPercent, weeklyPercent, windowReset: resetLabel(windowReset), weeklyReset: resetLabel(weeklyReset) };
 }
 
 export default {
@@ -67,23 +74,27 @@ export default {
   setup(ctx: Plugin.Context) {
     const stateDir = String(ctx.options.stateDir ?? process.env.OPEN_MUSE_STATE_DIR ?? defaultStateDir());
 
-    const [label, setLabel] = createSignal("Muse …");
+    const [quota, setQuota] = createSignal<Quota | null>(null);
+    const [pending, setPending] = createSignal(true);
+    const [collapsed, setCollapsed] = createSignal(false);
     const refresh = async () => {
       try {
         const origin = proxyOrigin(stateDir);
         if (!origin) {
-          setLabel("Muse —");
+          setQuota(null);
           return;
         }
         const res = await fetch(`${origin}/v1/usage`);
         if (!res.ok) {
-          setLabel("Muse —");
+          setQuota(null);
           return;
         }
         const body = (await res.json()) as { data?: unknown };
-        setLabel(quotaLabel(body.data) ?? "Muse —");
+        setQuota(parseQuota(body.data) ?? null);
       } catch {
-        setLabel("Muse —");
+        setQuota(null);
+      } finally {
+        setPending(false);
       }
     };
 
@@ -91,7 +102,7 @@ export default {
     const timer = setInterval(refresh, REFRESH_MS);
     onCleanup(() => clearInterval(timer));
 
-    // Refresh right after a turn lands too, so the footer picks up fresh
+    // Refresh right after a turn lands too, so the panel picks up fresh
     // quota without waiting for the next tick. Event names are best-effort:
     // a rename must never break the slot.
     const unsubscribers: Array<() => void> = [];
@@ -103,13 +114,52 @@ export default {
       }
     }
 
+    const green = () => ctx.theme.text.feedback.success.base;
+    const fg = () => ctx.theme.text.base;
+
     const release = ctx.ui.slot({
-      append: "prompt.footer.status",
-      render: () => (
-        <box flexDirection="row">
-          <text>{label()}</text>
-        </box>
-      ),
+      append: "sidebar.content",
+      render: () => {
+        const q = quota();
+        const head = (
+          <box flexDirection="row" onMouseDown={() => setCollapsed(!collapsed())}>
+            <text>{collapsed() ? "▶ Muse quota" : "▼ Muse quota"}</text>
+          </box>
+        );
+        if (collapsed() || !q) {
+          return (
+            <box flexDirection="column">
+              {head}
+              {!q && (
+                <box flexDirection="row" columnGap={1}>
+                  <text style={{ fg: green() }}>•</text>
+                  <text style={{ fg: fg() }}>{pending() ? "…" : "—"}</text>
+                </box>
+              )}
+            </box>
+          );
+        }
+        const pct = (n: number): string => `${String(n).padStart(3, " ")}%`;
+        return (
+          <box flexDirection="column">
+            {head}
+            <box flexDirection="row" columnGap={1}>
+              <text style={{ fg: green() }}>•</text>
+              <text style={{ fg: fg() }}>{"5h  "}</text>
+              <text style={{ fg: fg() }}>
+                {pct(q.windowPercent)} → {q.windowReset}
+              </text>
+            </box>
+            <box flexDirection="row" columnGap={1}>
+              <text style={{ fg: green() }}>•</text>
+              <text style={{ fg: fg() }}>week</text>
+              <text style={{ fg: fg() }}>
+                {pct(q.weeklyPercent)} → {q.weeklyReset}
+              </text>
+            </box>
+          </box>
+        );
+      },
     });
 
     return () => {

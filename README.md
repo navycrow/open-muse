@@ -326,10 +326,11 @@ Scope and limits (v1):
 
 ### Quota in the sidebar
 
-A TUI plugin shows your subscription quota next to the prompt (`Muse 5h 20% ·
-sem 46%`, refreshed every minute and after each turn). On OpenCode 2.x it's discovered automatically
+A TUI plugin shows your subscription quota in the sidebar (`Muse quota` panel:
+5h and weekly percents with progress bars and local reset times, refreshed every
+minute and after each turn). On OpenCode 2.x it's discovered automatically
 as the `tui` sibling of the server plugin — no config, no build needed (change the
-`append` target in `tui.tsx` to move it, e.g. `sidebar.footer`). On 1.x,
+`append` target in `tui.tsx` to move it, e.g. `prompt.footer.status`). On 1.x,
 register it in `tui.json`:
 
 ```json
