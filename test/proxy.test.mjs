@@ -331,9 +331,9 @@ test("streams a turn: text, reasoning, usage", async () => {
   assert.equal(out.content, "Muse heard: hello [images=0] [model=muse-spark-1.3] [effort=default]");
   assert.equal(out.reasoning, "Thinking about the request.");
   assert.equal(out.finish, "stop");
-  assert.equal(out.usage.prompt_tokens, 120);
+  assert.equal(out.usage.prompt_tokens, 70);
   assert.equal(out.usage.completion_tokens, 30);
-  assert.equal(out.usage.prompt_tokens_details.cached_tokens, 20);
+  assert.equal(out.usage.prompt_tokens_details.cached_tokens, 0);
   assert.ok(!out.reasoning.includes("Reminder"), "background reviewer items are not traced");
   assert.ok(out.done);
   assert.ok(!out.content.includes("OpenCode tools"), "system prompt is not forwarded by default");

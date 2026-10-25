@@ -463,6 +463,7 @@ How Muse events are mapped:
 | `item/started` / `item/completed` on a `toolCall` | `▸ tool: args` / `↳ tool done` trace lines |
 | `approval/requested` | answered with `approval/decide` by policy, plus a trace line |
 | `turn/completed` (`usage`) | final chunk with `finish_reason` and `usage` |
+| `session/tokenUsage` (× N calls) | one `prompt_tokens` per turn: the peak call's input (each call re-sends the context, so summing would count it N times); outputs stay summed |
 | `turn/completed` (`failed`) | HTTP 401/429/502, or an SSE `error` chunk mid-stream |
 
 `item/completed` is treated as authoritative, so text that missed a delta is still delivered.
